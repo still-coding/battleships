@@ -6,8 +6,13 @@ from config import BOARD_SIZE, SHIPS
 from random import randint
 
 Symbol = Enum("Symbol", ["Empty", "Ship", "Miss", "Hit"])
-ShipDirection = Enum("ShipDirection", ["Horizontal", "Vertical"], start=0)
+ShipDirection = Enum("ShipDirection", ["Horizontal", "Vertical"])
+Mode = Enum("Mode", ["Arrange", "Play"])
 
+
+class UsedDotShot(ValueError):
+    def __str__(self):
+        return "Used dot shot"
 
 @dataclass
 class Dot:
@@ -90,43 +95,63 @@ class Board:
         self.ready = False
         self.ships = []
         self.hid = True
-        self.mode = "arrange"
+        self.__mode = Mode.Arrange
+        
 
     def update(self):
         self.clear()
         for ship in self.ships:
             for d in ship.dots:
                 self.cells[d.row][d.col] = Symbol.Ship
-        if self.mode == "arrange":
+        if self.mode == Mode.Arrange:
             self.contour_ships()
+        
+    @property
+    def mode(self):
+        return self.__mode
+
+    @mode.setter
+    def mode(self, value):
+        if not isinstance(value, Mode):
+            raise TypeError("mode must be a correct Mode instance")
+        self.__mode = value
+        self.update()
+
 
     def add_ship(self, ship):
         self.ships.append(ship)
         self.update()
 
     def contour_ships(self):
-        ids = []
-        for i, row in enumerate(self.cells):
-            for j, cell in enumerate(row):
-                if cell == Symbol.Ship:
-                    continue
-                if any(
-                    map(
-                        lambda x: self.cells[x.row][x.col] == Symbol.Ship,
-                        Dot(i, j).surrounding(),
-                    )
-                ):
-                    ids.append((i, j))
-        for r, c in ids:
-            self.cells[r][c] = Symbol.Miss
+        for ship in self.ships:
+            for d in ship.contour:
+                self.cells[d.row][d.col] = Symbol.Miss
 
-    def isempty(self, dot):
+
+        # ids = []
+        # for i, row in enumerate(self.cells):
+        #     for j, cell in enumerate(row):
+        #         if cell == Symbol.Ship:
+        #             continue
+        #         if any(
+        #             map(
+        #                 lambda x: self.cells[x.row][x.col] == Symbol.Ship,
+        #                 Dot(i, j).surrounding(),
+        #             )
+        #         ):
+        #             ids.append((i, j))
+        # for r, c in ids:
+        #     self.cells[r][c] = Symbol.Miss
+
+    def is_empty(self, dot):
         return self.cells[dot.row][dot.col] == Symbol.Empty
+
+    def is_ship(self, dot):
+        return self.cells[dot.row][dot.col] == Symbol.Ship
 
     @classmethod
     def random_ships_arrangement(cls):
         result = cls()
-        result.mode = 'arrange'
         for ship_data in SHIPS:
             for _ in range(ship_data["count"]):
                 ship = Ship(length=ship_data["size"], name=ship_data["name"])
@@ -138,17 +163,22 @@ class Board:
                         else ShipDirection.Vertical
                     )
                     try:
-                        if all(map(result.isempty, ship.dots)):
+                        if all(map(result.is_empty, ship.dots)):
                             result.add_ship(ship)
                             break
                     except:
                         continue
-        result.mode = 'play'
-        result.update()
+        result.mode = Mode.Play
         return result
 
-    def shot(dot):
-        pass
+    def shot(self, dot):
+        if self.cells[dot.row][dot.col] == Symbol.Ship:
+            self.cells[dot.row][dot.col] = Symbol.Hit
+            return True
+        if self.cells[dot.row][dot.col] == Symbol.Empty:
+            self.cells[dot.row][dot.col] = Symbol.Miss
+            return False
+        raise UsedDotShot
 
 
 @dataclass
@@ -178,6 +208,45 @@ class Ship:
             for i in range(self.length)
         ]
 
+    @property
+    def contour(self):
+        result = []
+        if self.direction == ShipDirection.Horizontal:
+            for c in range(self.start.col - 1, self.start.col + self.length + 1):
+                for r in (self.start.row - 1, self.start.row + 1):
+                    try:
+                        result.append(Dot(r, c))
+                    except ValueError:
+                        pass
+            try:
+                result.append(Dot(self.start.row, self.start.col - 1))
+            except ValueError:
+                pass
+            try:
+                result.append(Dot(self.start.row, self.start.col + self.length))
+            except ValueError:
+                pass
+            return result
+        
+        if self.direction == ShipDirection.Vertical:
+            for r in range(self.start.row - 1, self.start.row + self.length + 1):
+                for c in (self.start.col - 1, self.start.col + 1):
+                    try:
+                        result.append(Dot(r, c))
+                    except ValueError:
+                        continue
+            try:
+                result.append(Dot(self.start.row - 1, self.start.col))
+            except ValueError:
+                pass
+            try:
+                result.append(Dot(self.start.row + self.length, self.start.col))
+            except ValueError:
+                pass
+        return result
+
+
+
 
 class Player(ABC):
     def __init__(self, own_board, enemy_board):
@@ -197,11 +266,12 @@ class Player(ABC):
             return True
 
 
-class User(Player):
-    def ask():
-        pass
-
-
 class AI(Player):
     def ask():
-        pass
+        return Dot.random()
+
+
+
+
+
+
