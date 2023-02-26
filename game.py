@@ -31,7 +31,7 @@ SYMBOL_MAPPING = {
 
 class User(Player):
     "Basically incapsulates user input for shooting"
-    def ask(self, window, input_generator, prev=None, **kwargs):
+    def ask(self, window, input_generator):
         play_message = [
             blue("Sink your opponent's ships. Shoot accurately!"),
             "Controls:",
@@ -42,15 +42,12 @@ class User(Player):
             f'{red("Enemy board".center(self.enemy_board.size * 4))} {green("Your board".center(self.own_board.size * 4))}',
         ]
 
-        if prev:
-            crosshair = prev
-        else:
-            crosshair = Dot()
+        crosshair = self.previous_shot if self.previous_shot else Dot()
         window.render_to_terminal(
             play_message
             + Game.get_board_image(self.enemy_board, crosshair, self.own_board)
         )
-
+        self.was_hit = False
         for c in input_generator:
             cant_shoot = False
             if c == "<ESC>":
@@ -250,26 +247,28 @@ class Game:
         with FullscreenWindow() as window:
             with Input() as input_generator:
                 while True:
+                    if not self.user.move(window, input_generator):
+                        return
                     if not self.ai_board.has_alive_ships():
                         window.render_to_terminal(
                             [self.grats(), bold("Press any key to exit.")]
                         )
                         next(input_generator)
                         return
-                    if not self.user.move(window, input_generator):
+                    if not self.ai.move():
                         return
-                    # if user.wants_to_exit:
-                    #     return
                     if not self.user_board.has_alive_ships():
                         window.render_to_terminal(
                             [self.grats(user_won=False), bold("Press any key to exit.")]
                         )
                         next(input_generator)
                         return
-                    self.ai.move()
 
     def start(self):
         self.greet()
+        # self.user_board = Board.random_ships_arrangement()
+        # self.user_board.hid = False
+        # self.ai_board.hid = False
         continue_game = self.arrange_user_ships()
         if not continue_game:
             return

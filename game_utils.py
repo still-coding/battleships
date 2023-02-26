@@ -235,18 +235,20 @@ class Player(ABC):
     def __init__(self, own_board, enemy_board):
         self.own_board = own_board
         self.enemy_board = enemy_board
+        self.previous_shot = None
+        self.was_hit = False
 
     @abstractmethod
     def ask():
         pass
 
     def move(self, *args):
-        shot_result = True
-        prev = None
-        while shot_result:
+        while True:
             try:
-                prev = self.ask(*args, prev=prev)
-                shot_result = self.enemy_board.shot(prev)
+                self.previous_shot = self.ask(*args)
+                self.was_hit = self.enemy_board.shot(self.previous_shot)
+                if not self.was_hit:
+                    break
                 if not self.enemy_board.has_alive_ships():
                     return True
             except (ShotInUsedDot, ValueError):
@@ -257,14 +259,14 @@ class Player(ABC):
 
 
 class AI(Player):
-    def ask(self, *args, prev=None, **kwargs):
-        if prev:
+    def ask(self):
+        if self.previous_shot and self.was_hit:
             up = randint(-1, 1)
             if up:
-                return Dot(prev.row + up, prev.col)
+                return Dot(self.previous_shot.row + up, self.previous_shot.col)
             else:
                 left = randint(-1, 1)
                 while not left:
                     left = randint(-1, 1)
-                return Dot(prev.row, prev.col + left)
+                return Dot(self.previous_shot.row, self.previous_shot.col + left)
         return Dot.random()
