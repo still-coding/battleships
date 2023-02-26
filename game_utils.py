@@ -1,18 +1,28 @@
-from dataclasses import dataclass, field
-from typing import ClassVar, List
-from enum import Enum
+# -*- coding: utf-8 -*-
+"""Game helper classes"""
+
 from abc import ABC, abstractmethod
-from config import BOARD_SIZE, SHIPS
+from dataclasses import dataclass, field
+from enum import Enum
 from random import randint
+from typing import ClassVar, List
+
+from config import BOARD_SIZE, SHIPS
 
 Symbol = Enum("Symbol", ["Empty", "Ship", "Miss", "Hit"])
 ShipDirection = Enum("ShipDirection", ["Horizontal", "Vertical"])
 Mode = Enum("Mode", ["Arrange", "Play"])
 
 
-class UsedDotShot(ValueError):
+class ShotInUsedDot(ValueError):
     def __str__(self):
-        return "Used dot shot"
+        return "Shot in already used dot (miss or hit)"
+
+
+class UserWantsToExit(RuntimeError):
+    def __str__(self):
+        return self.__name__
+
 
 @dataclass
 class Dot:
@@ -53,50 +63,23 @@ class Dot:
             if self.col < self.__class__._board_size - 1
             else self.__class__._board_size - 1
         )
-        
+
     @classmethod
     def random(cls):
         return Dot(randint(0, cls._board_size - 1), randint(0, cls._board_size - 1))
 
 
-    # def linearize(self):
-    #     return self.row * self.__class__._board_size + self.col
-
-    # @classmethod
-    # def from_linear_index(cls, i):
-    #     if not isinstance(i, int):
-    #         raise TypeError("index must be an integer")
-    #     if i < 0 or i >= cls._board_size * cls._board_size:
-    #         raise ValueError("index must be in [0, board_size * board_size)")
-    #     r = i // cls._board_size
-    #     c = i % cls._board_size
-    #     return Dot(r, c)
-
-    def surrounding(self):
-        result = []
-        for i in range(self.row - 1, self.row + 2):
-            for j in range(self.col - 1, self.col + 2):
-                try:
-                    new_dot = Dot(i, j)
-                except ValueError:
-                    continue
-                if new_dot != self:
-                    result.append(new_dot)
-        return result
-
-
 class Board:
+    "Board cells and ship manipulation."
     def clear(self):
         self.cells = [[Symbol.Empty] * self.size for _ in range(self.size)]
 
     def __init__(self, size=BOARD_SIZE):
         self.size = size
         self.clear()
-        self.ready = False
         self.ships = []
         self.hid = True
         self.__mode = Mode.Arrange
-        
 
     def update(self):
         self.clear()
@@ -105,7 +88,7 @@ class Board:
                 self.cells[d.row][d.col] = Symbol.Ship
         if self.mode == Mode.Arrange:
             self.contour_ships()
-        
+
     @property
     def mode(self):
         return self.__mode
@@ -117,7 +100,6 @@ class Board:
         self.__mode = value
         self.update()
 
-
     def add_ship(self, ship):
         self.ships.append(ship)
         self.update()
@@ -127,27 +109,18 @@ class Board:
             for d in ship.contour:
                 self.cells[d.row][d.col] = Symbol.Miss
 
-
-        # ids = []
-        # for i, row in enumerate(self.cells):
-        #     for j, cell in enumerate(row):
-        #         if cell == Symbol.Ship:
-        #             continue
-        #         if any(
-        #             map(
-        #                 lambda x: self.cells[x.row][x.col] == Symbol.Ship,
-        #                 Dot(i, j).surrounding(),
-        #             )
-        #         ):
-        #             ids.append((i, j))
-        # for r, c in ids:
-        #     self.cells[r][c] = Symbol.Miss
-
     def is_empty(self, dot):
         return self.cells[dot.row][dot.col] == Symbol.Empty
 
     def is_ship(self, dot):
         return self.cells[dot.row][dot.col] == Symbol.Ship
+
+    def has_alive_ships(self):
+        for ship in self.ships:
+            for d in ship.dots:
+                if self.cells[d.row][d.col] == Symbol.Ship:
+                    return True
+        return False
 
     @classmethod
     def random_ships_arrangement(cls):
@@ -171,24 +144,35 @@ class Board:
         result.mode = Mode.Play
         return result
 
+    def is_ship_dead(self, ship):
+        return all(map(lambda x: self.cells[x.row][x.col] == Symbol.Hit, ship.dots))
+
+    def find_ship(self, dot):
+        for ship in self.ships:
+            if dot in ship.dots:
+                return ship
+
     def shot(self, dot):
         if self.cells[dot.row][dot.col] == Symbol.Ship:
             self.cells[dot.row][dot.col] = Symbol.Hit
+            ship = self.find_ship(dot)
+            if self.is_ship_dead(ship):
+                for d in ship.contour:
+                    self.cells[d.row][d.col] = Symbol.Miss
             return True
         if self.cells[dot.row][dot.col] == Symbol.Empty:
             self.cells[dot.row][dot.col] = Symbol.Miss
             return False
-        raise UsedDotShot
+        raise ShotInUsedDot
 
 
 @dataclass
 class Ship:
+    "Logic for ships drawing"
     start: Dot = field(default_factory=lambda: Dot(0, 0))
     length: int = 1
     name: str = ""
     direction: ShipDirection = ShipDirection.Horizontal
-    hits: List[Dot] = field(default_factory=list)
-    on_board: Board | None = None
 
     def rotate(self):
         self.direction = (
@@ -227,7 +211,7 @@ class Ship:
             except ValueError:
                 pass
             return result
-        
+
         if self.direction == ShipDirection.Vertical:
             for r in range(self.start.row - 1, self.start.row + self.length + 1):
                 for c in (self.start.col - 1, self.start.col + 1):
@@ -246,9 +230,8 @@ class Ship:
         return result
 
 
-
-
 class Player(ABC):
+    "Abstract class for user and AI players"
     def __init__(self, own_board, enemy_board):
         self.own_board = own_board
         self.enemy_board = enemy_board
@@ -257,21 +240,31 @@ class Player(ABC):
     def ask():
         pass
 
-    def move():
-        try:
-            enemy_board.shot(self.ask())
-        except:
-            return False
-        else:
-            return True
+    def move(self, *args):
+        shot_result = True
+        prev = None
+        while shot_result:
+            try:
+                prev = self.ask(*args, prev=prev)
+                shot_result = self.enemy_board.shot(prev)
+                if not self.enemy_board.has_alive_ships():
+                    return True
+            except (ShotInUsedDot, ValueError):
+                continue
+            except UserWantsToExit:
+                return False
+        return True
 
 
 class AI(Player):
-    def ask():
+    def ask(self, *args, prev=None, **kwargs):
+        if prev:
+            up = randint(-1, 1)
+            if up:
+                return Dot(prev.row + up, prev.col)
+            else:
+                left = randint(-1, 1)
+                while not left:
+                    left = randint(-1, 1)
+                return Dot(prev.row, prev.col + left)
         return Dot.random()
-
-
-
-
-
-
