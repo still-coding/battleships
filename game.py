@@ -266,9 +266,6 @@ class Game:
 
     def start(self):
         self.greet()
-        # self.user_board = Board.random_ships_arrangement()
-        # self.user_board.hid = False
-        # self.ai_board.hid = False
         continue_game = self.arrange_user_ships()
         if not continue_game:
             return
